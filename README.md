@@ -1,3 +1,4 @@
+IMPORTANT: to view the Rmarkdown report of the project, download the .html file and open it.
 # Kidney stone classification project
 ## Project overview
 The goal of this project is to develop a classification model capable of distinguishing between patients with kidney stones and those without, based on several urinary chemical features. The analysis is carried out in R and includes data cleaning, exploratory data analysis, dimensionality reduction, regression analysis, and the development of a K-Nearest Neighbors (KNN) classifier.
@@ -20,4 +21,5 @@ The analysis was performed in R following these steps:
 * Classification: building a KNN model using the simplified dataset, testing different values of k, and evaluating performance metrics
 ## Results
 A KNN model was successfully implemented; however, its performance metrics were suboptimal, likely due to the limited size of the dataset (n = 79). In particular, the model achieved good specificity but low sensitivity, indicating difficulty in detecting positive (stone-present) cases.
+
 While the current results are inconclusive, the model may benefit significantly from additional data. With more samples, retraining could lead to improved predictive performance, making the approach more suitable for potential clinical applications.
