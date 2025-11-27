@@ -1,0 +1,255 @@
+---
+title: "Kidney stone modelling"
+author: "Marco Brega"
+date: "2025-11-18"
+output: html_document
+---
+# Introduction
+
+Kidney stone formation is a common clinical condition, and the ability to predict its presence using simple urine chemistry measurements could be valuable for early detection. This project aims to explore whether specific urinary parameters can be used to classify patients according to the presence or absence of kidney stones.
+
+# Data
+The data used for this project comes from the [Kidney Stone Prediction dataset](https://www.kaggle.com/datasets/vuppalaadithyasairam/kidney-stone-prediction-based-on-urine-analysis), available on Kaggle. This dataset contains 79 entries which describe urine samples collected from patients through a number of features:
+* Specific Gravity: density of urine relative to water
+* pH: negative logarithm of hydrogen ion concentration
+* Osmolarity (mOsm): measure proportional to the concentration of dissolved molecules
+* Conductivity (mMho): proportional to the concentration of charged ions
+* Urea Concentration (mmol/L)
+* Calcium Concentration (mmol/L)
+* Target: presence or absence of kidney stones
+
+# Methods
+The analysis consists of the following steps:
+begins with an inspection of the dataset, followed by data cleaning, removal of outliers and exploration of variable distributions and correlations. 
+Principal Component Analysis (PCA) is then used to guide feature selection and to simplify the dataset by identifying the variables that contribute most to overall variance. 
+A linear regression model is fitted to investigate the existence of a linear relationship between the selected predictors.
+The final part of the analysis focuses on constructing a K-Nearest Neighbors (KNN) classification model. 
+Given the small size of the dataset, limitations are expected, and improved performance may be achieved with a larger sample size.
+
+# Analysis
+## Data cleaning
+```{r, echo=FALSE, include=FALSE}
+
+library(tidyverse)
+library(GGally)
+library(class)
+library(gmodels)
+library(caret)
+```
+
+```{r, echo=TRUE, include = FALSE, results='hide'}
+#Importing and tidying data
+df_kidney_stones <- read_csv("kindey stone urine analysis.csv")
+
+df_kidney_stones <- df_kidney_stones %>%
+  mutate(target = factor(target, labels = c("Stone absent","Stone present")))
+```
+
+Let's check for possible missing values throughout the dataset:
+```{r, echo=TRUE}
+sum(is.na(df_kidney_stones))
+```
+
+There are no missing values.The next step in the data cleaning process will be to eliminate the outliers. We can detect the presence of outliers through a boxplot for each variable:
+```{r, echo=FALSE, fig.align='center'}
+boxplot(df_kidney_stones)
+```
+
+There are a number of outliers in ph and calc. We can just remove them:
+```{r}
+df_kidney_stones <- df_kidney_stones %>%
+  filter(ph > (quantile(ph, 0.25) - 1.5*IQR(ph)), ph < (quantile(ph, 0.75) + 1.5*IQR(ph))) %>%
+  filter(calc > (quantile(calc, 0.25) - 1.5*IQR(calc)), calc < (quantile(calc, 0.75) + 1.5*IQR(calc)))
+
+```
+
+The result of these operations is a clean dataset fit for EDA.
+```{r}
+head(df_kidney_stones)
+```
+
+## Exploratory data analysis
+### Evaluating distribution and correlation between variables
+
+It is possible to investigate (both graphically and through metrics) the distribution of all variables and the correlation between all of them. Since it is a categorical feature, we can exclude the target variable distribution, which will be represented as the fill colour for the data points.
+```{r, echo = FALSE, fig.width=10, fig.height=6, fig.dpi=1000, fig.align='center'}
+ggpairs(
+  df_kidney_stones[1:6], 
+  aes(color = df_kidney_stones$target),
+  upper = list(continuous = wrap("cor", size = 3)),
+  lower = list(continuous = wrap("points", size = 1))
+  )
+```
+A number of variables appear to be strongly correlated:
+
+* Specific gravity ("gravity") is positively correlated with both osmolarity ("osmo") and urea concentration ("urea"), while also being more mildly correlated with conductivity ("cond") and calcium concentration ("calc").
+* Osmolarity is positively correlated with conductivity, urea and calcium concentration.
+* Conductivity is positively correlated with urea and calcium concentration.
+* Calcium and urea concentration are positively correlated.
+
+## Model building
+### Conducting PCA in order to apply dimensionality reduction
+
+In order to simplify the model, we can apply Principal Component Analysis (PCA). 
+```{r, echo=TRUE, fig.width=7, fig.height=7, fig.align='center'}
+df_kidney_stones_scaled <- scale(df_kidney_stones[1:6])
+PCA1 <- prcomp(df_kidney_stones_scaled)
+summary(PCA1)
+biplot(PCA1)
+```
+
+According to the output of the model, the first two PCs explain about 77% of the toal variance: keeping this in mind, from the biplot it becomes apparent how a number of variables ("cond", "calc", "osmo", "gravity" and "urea") are aligned with the firs PC, while the "pH" variable aligns with the second PC. 
+
+Thus, it is possible to simplify the model by keeping just two variables; in this case, we choose the pH and gravity variables.
+```{r, echo=FALSE}
+df_kidney_stones_simplified <- df_kidney_stones %>%
+  select("gravity","ph","target") %>%
+  mutate(
+    gravity = scale(gravity),
+    ph = scale(ph)
+  )
+```
+### Evaluating linear relationship between selected variables
+
+Let's continue by evaluating the relationship between the two selected variables:
+```{r, echo=TRUE, fig.align='center'}
+ggplot(df_kidney_stones, aes(x = ph, y = gravity, color = target)) +
+  geom_point()
+
+cor(df_kidney_stones_simplified$gravity, df_kidney_stones_simplified$ph)
+```
+As previously seen, the two variables are negatively correlated, though not strongly. The relationship between them appears to be linear, so we can attempt to create a linear model to define their relationship.
+
+```{r, echo=FALSE, fig.align='center'}
+ggplot(df_kidney_stones_simplified, aes(x = ph, y = gravity)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = FALSE) +
+  labs(
+    title = "Estimated Linear relationship between Specific gravity and pH"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+
+lm_ph_gravity <- lm(gravity ~ ph, data = df_kidney_stones)
+summary(lm_ph_gravity)
+
+```
+Overall, the model is significant (p-value < 0.01). The fitted line's slope is significant (p-value < 0.01), though the same cannot be said for intercept. The most important aspect, though, is that the very low R2 metric states that the linear model does not explain a sufficient proportion of total variance.
+Thus, we cannot conclusively say that the the variables ph and gravity are linked by a linear relationship.
+
+### Production of KNN algorithm
+
+We can try to develop a K-NearestNeighbors algorithm to try and classify future entries. Given the low number of entries, we can try to set a range of numbers between 1 and 10 as neighbors.
+
+```{r, echo=FALSE}
+#Splitting into train and test datasets
+set.seed(123)
+test_indexes <- sample(
+  1:nrow(df_kidney_stones_simplified), 
+  size = 0.2*nrow(df_kidney_stones_simplified),
+  replace = FALSE
+  )
+
+X_train <- df_kidney_stones_simplified[-test_indexes,-3]
+X_test <- df_kidney_stones_simplified[test_indexes,-3]
+y_train <- df_kidney_stones_simplified$target[-test_indexes]
+y_test <- df_kidney_stones_simplified$target[test_indexes]
+```
+
+```{r, include=FALSE, echo = FALSE}
+
+model_parameters <- data.frame(
+  Sensitivity = numeric(),
+  Specificity = numeric(),
+  Pos_Pred_Value = numeric(),
+  Neg_Pred_Value = numeric(),
+  Precision = numeric(),
+  Recall = numeric(),
+  F1 = numeric(),
+  Prevalence = numeric(),
+  Detection_Rate = numeric(),
+  Detection_Prevalence = numeric(),
+  Balanced_Accuracy = numeric() 
+)
+```
+
+```{r, results=FALSE}
+for (k in c(1:10)){
+  print(k)
+  
+  knn_model_k <- knn(
+    train = X_train, 
+    test = X_test,
+    cl = y_train,
+    k = k
+  )
+
+  knn_model_k_confusion_matrix <- confusionMatrix(
+    data = knn_model_k,
+    reference = y_test,
+    positive = "Stone present"
+  )
+  
+  print(knn_model_k_confusion_matrix)
+  
+  model_parameters[k,] <- knn_model_k_confusion_matrix$byClass
+}
+```
+
+```{r}
+model_parameters
+
+```
+
+To evaluate performance based on k, since we are modelling biomedical data, we can plot two different metrics: 
+
+* We could choose k based on the Sensitivity metric, which quantifies the amount of positive events detected;
+* We may also use the F1 metric, which measures precision when detecting positive events. 
+
+```{r, echo = FALSE, fig.align='center'}
+
+ggplot(data = model_parameters) +
+  labs(
+    x = "k",
+    y = "Metric value",
+    title = "Sensitivity and F1 score for k in range 1-10"
+  ) +
+  geom_line(
+    aes(
+      x = 1:nrow(model_parameters),
+      y = Sensitivity,
+      color = "Sensitivity"
+    )
+  ) +
+  geom_line(
+    aes(
+      x = 1:nrow(model_parameters),
+      y = F1,
+      color = "F1"
+    )
+  ) +
+  scale_color_manual(
+    name = "Metric",
+    values = c(
+      "Sensitivity" = "blue",
+      "F1" = "red"
+    )
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+
+
+```
+
+We can choose the value of hyperparameter k which produces the maximum value for each of the two metrics: in this case, the optimal value of k is 4. This enables us to produce a reliable model that avoids false negatives (by maximizing Sensitivity) and also minimizes the combined risk of both false positives and false negatives (F1 metric).
+
+```{r}
+
+knn_model_4_def <- model_parameters[4,]
+
+```
+## Conclusions
+
+The chosen metrics' highest values (Sensitivity = 0.5, F1 = 0.6) are still below the acceptable threshold of 0.7. The model, at this time, is thus unfit for predictions on future patients. This is probably a result of the low number of entries for the original dataset. However, in the future, should a higher number of entries be available, a new model may be created through the same algorithm and trained on the larger dataset, resulting in higher Sensitivity and F1 score.
